@@ -1,9 +1,7 @@
-# The-German-Phenomenlogical-Control-Scale
+# The German Phenomenlogical Control Scale
 
 
-## Read me The German Phenomenlogical Control Scale
-
-
+## Overview
 You will find three folders in repository:
 - Audio Files:
 	Five .mp3 audio files including the instructions of the German PC Scale as used for the validation study.
@@ -16,10 +14,11 @@ You will find three folders in repository:
 
 
 ## Audio Files
-
 The audio files are split into different parts so implimentation into online survey builders is easier. 
 Before starting the survey we let the participants do a sound check to make sure the volume is adequate, we used a royalty free music file for this. 
-- Audio file 1:The whole intro and all excersises except for the last one. For our study, we uploaded this first file to Youtube (can be 	found here: https://youtu.be/deED0TOOkWM) with a black background. This was done so it is easier to fade the three coloured balls in the negative visual halluzination in and out, the image file for this excersise is also provided. If there is an option to skip to the next page it should only be pressable after the whole video has played, otherwise people might watch the video at a faster speed or skip parts. 
+- Audio file 1:The whole intro and all excersises except for the last one. For our study, we uploaded this first file to Youtube (can be found here: https://youtu.be/deED0TOOkWM) with a black background. 
+This was done so it is easier to fade the three coloured balls in the negative visual halluzination in and out. The image file for this excersise is provided as well. 
+If there is an option to skip to the next page it should only be pressable after the whole video has been played, otherwise people might watch the video at a faster speed or skip parts. 
 - Audio file 2: The amnesia task 
 - Audio file 3: Asking the participant to write down everything they remember (before being asked to remember everything again)
 - Audio file 4: Asking the participant to write down everything they remember (after being asked to remember everything again)
