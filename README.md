@@ -1,4 +1,4 @@
-# The German Phenomenlogical Control Scale
+# The German Phenomenological Control Scale
 
 
 ## Overview
