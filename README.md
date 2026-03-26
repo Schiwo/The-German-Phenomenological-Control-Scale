@@ -38,7 +38,7 @@ Please use the github issues section or send a mail to m.luise.schreiter@tuebing
 
 Please cite the German PC Scale as:
 
-Schreiter, M. L., Schiltenwolf, M., Antunovic, M., & Lush, P. (2023). The German Phenomenlogical Control Scale. Retrieved from: https://github.com/Schiwo/The-German-Phenomenlogical-Control-Scale
+Schiltenwolf, M., Schreiter, M. L., Antunovic, M., & Lush, P. (2023). The German Phenomenlogical Control Scale. Retrieved from: https://github.com/Schiwo/The-German-Phenomenlogical-Control-Scale
 
 
 ## License
