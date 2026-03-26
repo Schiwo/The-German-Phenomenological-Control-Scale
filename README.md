@@ -31,14 +31,14 @@ If there is an option to skip to the next page it should only be pressable after
 
 ## Questions and Suggestions
 
-Please use the github issues section or send a mail to marie-luise.schreiter@uni-tuebingen.de.
+Please use the github issues section or send a mail to m.luise.schreiter@tuebingen.mpg.de or m.schiltenwolf@lmu.de.
 
 
 ## Citation
 
 Please cite the German PC Scale as:
 
-Schreiter, M. L., Antunovic, M., Schiltenwolf, M., Seth, A. K., & Lush, P. (2023). The German Phenomenlogical Control Scale. Retrieved from: https://github.com/Schiwo/The-German-Phenomenlogical-Control-Scale
+Schreiter, M. L., Schiltenwolf, M., Antunovic, M., & Lush, P. (2023). The German Phenomenlogical Control Scale. Retrieved from: https://github.com/Schiwo/The-German-Phenomenlogical-Control-Scale
 
 
 ## License
