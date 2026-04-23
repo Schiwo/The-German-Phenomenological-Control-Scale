@@ -1,0 +1,954 @@
+---
+title: "Validation of the German PC Scale"
+author: "Moritz Schiltenwolf"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+# Overview
+
+This notebook analyses the German PC scale validation dataset.
+
+
+| Variable | Description                                                                          |
+| -------- | ------------------------------------------------------------------------------------ |
+| SK01     | Hand lowering (0 = Normal severity, 5 = Very severe)                                 |
+| SK02     | Moving hands together (0 = No force, 5 = Strong force)                               |
+| SK03     | Mosquito hallucination (0 = No mosquito, 5 = Like a real mosquito)                   |
+| SK04     | Sweet taste (0 = No taste, 5 = Strong taste)                                         |
+| SK05     | Sour taste (0 = No taste, 5 = Strong taste)                                          |
+| SK04SK05 | Taste mean (calculated in the script)                                                |
+| SK06     | Arm rigidity (0 = Normal / no stiffness, 5 = Very stiff)                             |
+| SK07     | Arm immobilization (0 = Normal / no heaviness, 5 = Very heavy)                       |
+| SK08     | Music hallucination (0 = No music, 5 = Clear music)                                  |
+| SK09     | Negative visual hallucination (0 = Three balls seen, 5 = Two balls seen)             |
+| SK10     | Amnesia (0 = Normal memory, 5 = No memory)                                           |
+| SK12     | Urge to press space bar (0 = No urge, 5 = Clear urge)                                |
+| SK13     | Space bar amnesia (0 = Normal memory of instructions, 5 = No memory of instructions) |
+| SK12SK13 | Space bar mean (calculated in the script)                                            |
+| KK02_01  | Items remembered before being asked again                                            |
+| KK03_01  | Items remembered after being asked again                                             |
+| SO01     | Gender (1 = female, 2 = male, 3 = diverse)                                           |
+| SO02_01  | Age                                                                                  |
+| SC02     | Answered all questions seriously (0 = yes, 2 = no)                                   |
+| TIME005  | Time needed to complete the experiment (seconds)                                     |
+
+
+
+
+## Import libraries
+
+```{r setup}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 8,
+  fig.height = 5,
+  fig.align = "center"
+)
+
+library(tidyverse)
+library(Hmisc)
+library(psych)
+library(ggdist)
+library(patchwork)
+library(ggthemr)
+
+ggthemr("flat")
+
+```
+
+## Read data
+```{r read data}
+dat <- read.csv("GitHub/german_pc_scale_validation_data.CSV",
+                sep = ";")
+```
+
+## Exclusion Criteria
+```{r exclusions}
+# Participant answered all questions meaningfully
+dat |> count(SC02)
+outlierMeaningful <- dat[dat$SC02 == 2 ,]$CASE
+
+
+# Exclude participants how have taken less than 15min for the study (indicating that they skipped parts of the videos)
+timeTaken <- dat$TIME005
+timeTaken <- timeTaken[!is.na(timeTaken)]
+lower_bound <- min(timeTaken, 800) - 1e-8
+upper_bound <- max(timeTaken, 1500) + 1e-8
+
+
+breaks <- c(lower_bound, seq(800, 1500, by = 100), upper_bound)
+
+ggplot(data.frame(x = timeTaken), aes(x = x)) +
+  geom_histogram(breaks = breaks,
+                 closed = "left") +
+  geom_vline(xintercept = 900, color = "red", size = 1) +
+  coord_cartesian(xlim = c(800, 1500)) +
+  labs(x = "Time taken",
+       y = "Count")
+
+outlierTime <- dat[dat$TIME005 < 900 ,]$CASE
+
+# remove outlier from dataset
+dat <- dat[! dat$CASE %in% outlierMeaningful, ]
+dat <- dat[! dat$CASE %in% outlierTime, ]
+```
+
+## Prepare dataframe
+```{r refactor}
+# Refactor columns to factors 
+cols <- c("SK01","SK02","SK03","SK04","SK05", "SK06","SK07","SK08","SK09","SK10", "SK12","SK13") 
+dat[cols] <- lapply(dat[cols], function(x) as.numeric(x) - 1)
+```
+
+```{r label data}
+# Label data
+label(dat$SK01) <- "Hand lowering"
+label(dat$SK02) <- "Moving hands together"
+label(dat$SK03) <- "Mosquito hallucination"
+label(dat$SK04) <- "Sweet taste"
+label(dat$SK05) <- "Sour taste"
+label(dat$SK06) <- "Arm rigidity"
+label(dat$SK07) <- "Arm immobilization"
+label(dat$SK08) <- "Music hallucination"
+label(dat$SK09) <- "Negative visual hallucination"
+label(dat$SK10) <- "Amnesia"
+label(dat$SK12) <- "Urge to press space bar"
+label(dat$SK13) <- "Space bar amnesia"
+
+label(dat$KK02_01) <- "Items remembered before being asked again"
+label(dat$KK03_01) <- "Items remembered after being asked again"
+
+label(dat$SO01) <- "Gender"
+label(dat$SO02_01) <- "Age"
+
+label(dat$SC02) <- "Answered all questions seriously"
+
+label(dat$TIME005) <- "Completion time (experiment duration)"
+```
+
+```{r calculate item 4 and 10}
+# calculate item 4 (arithmetic mean of taste sweet and sour) and 10 (geometric mean of Urge to press space bar and space bar amnesia)
+dat <- dat |> mutate(SK04SK05 = (SK04 + SK05) / 2)
+label(dat$SK04SK05) <- "Taste Halluctionation"
+
+dat <- dat |> mutate(SK12SK13 = sqrt(SK12 * SK13))
+label(dat$SK12SK13) <- "Post-session suggestion"
+```
+
+## Single item descriptives
+
+```{r}
+#function to get bootstrapped drop item cronbach's alpha
+
+alpha_drop_boot_ci <- function(df, B = 2000, conf = 0.95, seed = NULL, warnings = FALSE, ...) {
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
+  if (!requireNamespace("psych", quietly = TRUE)) {
+    stop("Package 'psych' must be installed.")
+  }
+
+  if (!is.data.frame(df) && !is.matrix(df)) {
+    stop("'df' must be a data frame or matrix containing only the scale items.")
+  }
+
+  df <- as.data.frame(df)
+
+  if (ncol(df) < 2) {
+    stop("At least 2 items are required.")
+  }
+
+  if (!all(vapply(df, is.numeric, logical(1)))) {
+    stop("All columns in 'df' must be numeric.")
+  }
+
+  if (!is.numeric(B) || length(B) != 1 || B < 1) {
+    stop("'B' must be a positive integer.")
+  }
+  B <- as.integer(B)
+
+  if (!is.numeric(conf) || length(conf) != 1 || conf <= 0 || conf >= 1) {
+    stop("'conf' must be a single number between 0 and 1.")
+  }
+
+  alpha_level <- 1 - conf
+  probs <- c(alpha_level / 2, 1 - alpha_level / 2)
+
+  # Original estimates
+  a0 <- psych::alpha(df, warnings = warnings, ...)
+  item_names <- rownames(a0$alpha.drop)
+
+  drop_est <- a0$alpha.drop$raw_alpha
+  names(drop_est) <- item_names
+
+  # Bootstrap matrix: rows = resamples, cols = items
+  boot_drop <- matrix(NA_real_, nrow = B, ncol = length(drop_est))
+  colnames(boot_drop) <- item_names
+
+  for (b in seq_len(B)) {
+    idx <- sample.int(nrow(df), size = nrow(df), replace = TRUE)
+
+    boot_drop[b, ] <- tryCatch({
+      ab <- psych::alpha(df[idx, , drop = FALSE], warnings = warnings, ...)
+      vals <- ab$alpha.drop$raw_alpha
+      names(vals) <- rownames(ab$alpha.drop)
+      vals <- vals[item_names]
+      as.numeric(vals)
+    }, error = function(e) {
+      rep(NA_real_, length(drop_est))
+    })
+  }
+
+  # Percentile bootstrap CIs
+  cis <- t(apply(boot_drop, 2, function(x) {
+    if (all(is.na(x))) {
+      c(NA_real_, NA_real_)
+    } else {
+      quantile(x, probs = probs, na.rm = TRUE, names = FALSE)
+    }
+  }))
+
+  out <- data.frame(
+    item_dropped = item_names,
+    alpha_if_dropped = as.numeric(drop_est[item_names]),
+    ci_lower = cis[, 1],
+    ci_upper = cis[, 2],
+    row.names = NULL
+  )
+
+  out
+}
+```
+
+```{r calculate descriptives}
+# Items to include
+items <- c("SK01","SK02","SK03","SK04SK05","SK06","SK07","SK08","SK09","SK10","SK12SK13")
+  # c("SK01","SK02","SK03","SK04","SK05",
+  #          "SK06","SK07","SK08","SK09","SK10",
+  #          "SK12","SK13","SK04SK05","SK12SK13")
+
+# Subset data
+dat_items <- dat[, items]
+
+# Cronbach's alpha
+alpha_res <- psych::alpha(dat_items, n.iter=5000)
+
+# 95% C for # Cronbach's alpha
+alpha_res$boot.ci
+
+# Extract stats
+means <- colMeans(dat_items, na.rm = TRUE)
+sds   <- apply(dat_items, 2, sd, na.rm = TRUE)
+
+# Skewness and Kurtosis
+skew  <- apply(dat_items, 2, psych::skew, na.rm = TRUE)
+kurt  <- apply(dat_items, 2, psych::kurtosi, na.rm = TRUE)
+
+
+# Alpha if item removed
+alpha_drop <- alpha_res$alpha.drop
+
+# Bootstrap 95% CI for alpha-if-item-dropped
+drop_boot <- alpha_drop_boot_ci(dat_items, B = 5000, seed = 123)
+drop_boot
+
+# Calculate PC score per person
+PC <- dat |>
+  mutate(
+    PC = rowMeans(
+      across(c(SK01, SK02, SK03,
+               SK06, SK07, SK08, SK09, SK10,
+               SK04SK05, SK12SK13))
+    )
+  ) |>
+  select(CASE, PC)
+
+# Item-total correlation: each item correlated with PC
+item_total <- sapply(items, function(x) {
+  cor(dat[[x]], PC$PC, use = "pairwise.complete.obs" , method = "pearson")
+})
+
+result <- data.frame(
+  item_code  = items,
+  Item       = sapply(items, function(x) Hmisc::label(dat[[x]])),
+  Mean       = round(means, 2),
+  SD         = round(sds, 2),
+  Skew       = round(skew, 2),
+  Kurt       = round(kurt, 2),
+  Alpha      = round(alpha_drop$raw_alpha, 2),
+  CI_Low     = round(drop_boot$ci_lower, 2),
+  CI_Up      = round(drop_boot$ci_upper, 2),
+  ItemTotal  = round(item_total, 2)
+)
+
+result 
+```
+
+```{r alpha drop item}
+a0 <- psych::alpha(dat_items, warnings = TRUE)
+a0
+a0$alpha.drop
+a0$total
+```
+
+
+
+```{r calculate PC scores}
+# Calculacte PC Score per person
+PC <- dat |> mutate(PC = rowMeans(across(c(SK01,SK02,SK03,
+           SK06,SK07,SK08,SK09,SK10,
+           SK04SK05,SK12SK13)))) |> 
+  select(CASE, PC)
+
+PC
+
+percentile_rank <- function(sample, value) {
+  100 * sum(sample <= value) / length(sample)
+}
+
+percentile_rank(PC$PC, 2.8)
+```
+
+## Demographics
+```{r demographics}
+# age 
+mean(dat$SO02_01)
+range(dat$SO02_01)
+sd(dat$SO02_01)
+
+# Gender (1=female, 2=male, 3=diverse)
+dat |> count(SO01)
+
+# Time taken
+median(dat$TIME005)/60
+min(dat$TIME005)/60
+max(dat$TIME005)/60
+
+```
+
+## Plots
+```{r PC histo}
+# Histogram of PC Scores with Density
+ggplot(PC, aes(x = PC)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 color = "black",
+                 fill = "gray",
+                 binwidth = 0.5,
+                 boundary = 0,
+                 alpha = 0.7) +
+  geom_density(linewidth = 1.2) +
+  labs(x = "PC-Ger Score",
+       y = "Density") +
+  theme(
+    axis.title = element_text(face = "bold", size = 14)
+  )
+```
+
+```{r PC raincloud plot}
+# raincloud plot for PC
+my_col <- "#4C72B0"
+
+ggplot(PC, aes(x = PC, y = "")) +
+  stat_slab(
+    fill = my_col,
+    alpha = 0.7,     
+    adjust = .5,
+    side = "top",
+    color = NA
+  ) +
+  stat_dots(
+    fill = my_col,
+    alpha = 0.7,     
+    side = "bottom",
+    justification = 1,
+    binwidth = 0.1,
+    dotsize = .7,
+    stackratio = 0.8
+  ) +
+  geom_boxplot(
+    fill = my_col,
+    alpha = 1,       
+    width = 0.12,
+    outlier.shape = NA,
+    color = "black"
+  ) +
+  labs(
+    x = "PC-Ger Score",
+    y = "Density"
+  ) +
+  theme(
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+```
+
+
+```{r single item plots config}
+items <- c("SK01","SK02","SK03","SK04SK05","SK06",
+           "SK07","SK08","SK09","SK10","SK12SK13")
+
+var_labels <- c(
+  SK01 = "Hand\nlowering",
+  SK02 = "Moving\nhands\ntogether",
+  SK03 = "Mosquito\nhallucination",
+  SK04 = "Sweet\ntaste",
+  SK05 = "Sour\ntaste",
+  SK06 = "Arm\nrigidity",
+  SK07 = "Arm\nimmobilisation",
+  SK08 = "Music\nhallucination",
+  SK09 = "Negative\nvisual\nhallucination",
+  SK10 = "Amnesia",
+  SK12 = "Urge to\npress\nspace bar",
+  SK13 = "Space bar\namnesia",
+  SK04SK05 = "Taste\nhallucination",
+  SK12SK13 = "Post-session\nsuggestion"
+)
+
+label_numbers <- c(
+  SK01 = "1",
+  SK02 = "2",
+  SK03 = "3",
+  SK04SK05 = "4",
+  SK06 = "5",
+  SK07 = "6",
+  SK08 = "7",
+  SK09 = "8",
+  SK10 = "9",
+  SK12SK13 = "10"
+)
+
+var_labels_num <- setNames(
+  paste0(label_numbers[names(var_labels)], ". ", var_labels),
+  names(var_labels)
+)
+
+vars_left  <- c("SK01","SK02","SK03","SK04SK05", "SK06")
+vars_right <- c("SK07","SK08","SK09","SK10","SK12SK13")
+
+singleItemPlot_data <- dat  |> 
+      select(CASE, all_of(items)) %>%
+      mutate(across(everything(), ~ as.numeric(.))) %>%
+      pivot_longer(cols = -CASE,
+               names_to = "Item",
+               values_to = "value")
+```
+
+```{r single item dot bars}
+make_plot <- function(data, vars) {
+  data_filtered <- data %>%
+    filter(Item %in% vars) %>%
+    mutate(Item = factor(Item, levels = rev(vars)))
+
+  ggplot() +
+        # Layer 2: SK12SK13 with different parameters
+    geom_dots(
+      data = data_filtered %>% filter(Item == "SK12SK13"),
+      aes(x = value, y = Item, fill = Item, color = Item),
+      smooth = smooth_discrete(width = 3.5, size = .2), 
+      binwidth = 0.1,
+      dotsize = .65
+    ) +
+    
+    # Layer 1: all items except SK12SK13
+    geom_dots(
+      data = data_filtered %>% filter(Item != "SK12SK13"),
+      aes(x = value, y = Item, fill = Item, color = Item),
+      smooth = smooth_discrete(width = .8, size = .1),
+      binwidth = 0.1,
+      dotsize = .65
+    ) +
+    
+
+
+    scale_y_discrete(labels = var_labels_num, expand = expansion(mult = c(0, 0))) +
+    scale_x_continuous(breaks = 0:5) +
+
+    scale_fill_manual(values = c(
+      SK01 = "#2ECC71FF",
+      SK02 = "#F1C40FFF",
+      SK03 = "#E74C3CFF",
+      SK04SK05 = "#9B59B6FF",
+      SK06 = "#1ABC9CFF",
+      SK07 = "#db00b6",
+      SK08 = "#D35400FF",
+      SK09 = "#65f7f4",
+      SK10 = "#1f78b4",
+      SK12SK13 = "#666666"
+    )) +
+    scale_color_manual(values = c(
+      SK01 = "#2ECC71FF",
+      SK02 = "#F1C40FFF",
+      SK03 = "#E74C3CFF",
+      SK04SK05 = "#9B59B6FF",
+      SK06 = "#1ABC9CFF",
+      SK07 = "#db00b6",
+      SK08 = "#D35400FF",
+      SK09 = "#65f7f4",
+      SK10 = "#1f78b4",
+      SK12SK13 = "#666666"
+    )) +
+
+    labs(
+      x = "PC-Ger Score",
+      y = NULL
+    ) +
+    theme_minimal() +
+    theme(
+      axis.title = element_text(face = "bold", size = 24),
+      axis.text = element_text(face = "bold", size = 24),
+      axis.text.y = element_text(
+        face = "bold",
+        size = 24,
+        hjust = 0,
+        margin = margin(r = 10)
+      ),
+      legend.position = "none"
+    )
+}
+
+p1 <- make_plot(singleItemPlot_data, vars_left)
+p2 <- make_plot(singleItemPlot_data, vars_right)
+
+p1 + p2
+```
+
+
+```{r save plots, include=FALSE}
+ggsave(
+  filename = "single_item_plot.png",
+  plot = p1 + p2,
+  width = 20,
+  height = 20,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+# Comparison with Lush et al. (2021), First test data
+```{r prepare data}
+Lush_dat <- read.csv("PeteOSF/PCS_norms_first_test_data.csv", sep = ",")
+
+Lush_dat <- Lush_dat %>%  filter(exclude == 0)
+
+rename_map <- c(
+  ParticipantNumber                   = "CASE",
+  HandLoweringSubjectiveRating        = "SK01",
+  HandsTogetherSubjectiveRating       = "SK02",
+  MosquitoSubjectiveRating            = "SK03",
+  SweetSubRating                      = "SK04",
+  SourSubRating                       = "SK05",
+  ArmRigiditySubjectiveRating         = "SK06",
+  ArmImmobilisationSubjectiveRating   = "SK07",
+  MusicSubjectiveRating               = "SK08",
+  VisualHallucinationSubjectiveRating = "SK09",
+  AmnesiaSubjectiveRating             = "SK10",
+  PostHypnoticSub1                    = "SK12",
+  PostHypnoticSub2                    = "SK13",
+  TasteSubjectiveRating               = "SK04SK05",
+  PostHypnoticSubjectiveRating        = "SK12SK13"
+)
+
+label_map <- c(
+  SK01   = "Hand lowering",
+  SK02   = "Moving hands together",
+  SK03   = "Mosquito hallucination",
+  SK04   = "Sweet taste",
+  SK05   = "Sour taste",
+  SK06   = "Arm rigidity",
+  SK07   = "Arm immobilization",
+  SK08   = "Music hallucination",
+  SK09   = "Negative visual hallucination",
+  SK10   = "Amnesia",
+  SK12   = "Urge to press space bar",
+  SK13   = "Space bar amnesia",
+  SK0405 = "Taste Halluctionation",
+  SK1213 = "Post-session suggestion"
+)
+
+
+matched <- intersect(names(rename_map), names(Lush_dat))
+names(Lush_dat)[match(matched, names(Lush_dat))] <- rename_map[matched]
+
+# Items to include
+items <- c("SK01","SK02","SK03","SK04SK05","SK06","SK07","SK08","SK09","SK10","SK12SK13")
+itemsPC <- c("SK01","SK02","SK03","SK04SK05","SK06","SK07","SK08","SK09","SK10","SK12SK13", "PC")
+
+Lush_dat <- Lush_dat %>% 
+            select(CASE, all_of(items)) %>% 
+            mutate(PC = rowMeans(across(all_of(items), ~ as.numeric(.)))) %>% 
+            mutate(group = "Original") %>% 
+            mutate(across(all_of(items), ~ as.numeric(.)))
+
+Ger_dat <- dat %>% 
+           select(CASE, all_of(items)) %>% 
+           mutate(PC = rowMeans(across(all_of(items), ~ as.numeric(.)))) %>% 
+           mutate(group = "German") %>% 
+           mutate(across(all_of(items), ~ as.numeric(.)))
+
+
+combined_dat <- bind_rows(Lush_dat, Ger_dat) %>% 
+  select(CASE, group, SK01, SK02, SK03, SK04SK05, SK06, SK07, SK08, SK09, SK10, SK12SK13, PC)
+
+for (nm in intersect(names(label_map), names(combined_dat))) {
+  Hmisc::label(combined_dat[[nm]]) <- label_map[[nm]]
+}
+
+
+combined_dat_long <- combined_dat %>%
+  mutate(across(all_of(itemsPC), ~ as.numeric(haven::zap_labels(.x)))) %>%
+  pivot_longer(
+    cols = all_of(itemsPC),
+    names_to = "Item",
+    values_to = "value"
+  )
+
+```
+
+## Item-Level Descriptives
+```{r Item-Level Descriptives}
+
+item_desc <- combined_dat %>%
+  group_by(group) %>%
+  group_modify(~{
+    
+    dat_items <- .x[, items, drop = FALSE]
+    
+    # Cronbach's alpha
+    alpha_res <- psych::alpha(dat_items, n.iter = 5000)
+    alpha_drop <- alpha_res$alpha.drop
+    
+    # Bootstrap CI for alpha if item dropped
+    drop_boot <- alpha_drop_boot_ci(dat_items, B = 5000, seed = 123)
+    
+    # Item descriptives
+    means <- colMeans(dat_items, na.rm = TRUE)
+    sds   <- apply(dat_items, 2, sd, na.rm = TRUE)
+    skew  <- apply(dat_items, 2, psych::skew, na.rm = TRUE)
+    kurt  <- apply(dat_items, 2, psych::kurtosi, na.rm = TRUE)
+    
+    # Person composite score within group
+    PC <- .x %>%
+      mutate(
+        PC = rowMeans(across(all_of(items)), na.rm = TRUE)
+      ) %>%
+      pull(PC)
+    
+    # Item-total correlation within group
+    item_total <- sapply(items, function(x) {
+      cor(.x[[x]], PC, use = "pairwise.complete.obs", method = "pearson")
+    })
+    
+    item_total_corrected <- alpha_res$item.stats$r.drop
+
+    data.frame(
+      item_code = items,
+      Item      = sapply(items, function(x) Hmisc::label(.x[[x]])),
+      Mean      = round(means, 2),
+      SD        = round(sds, 2),
+      Skew      = round(skew, 2),
+      Kurt      = round(kurt, 2),
+      Alpha     = round(alpha_drop$raw_alpha, 2),
+      CI_Low    = round(drop_boot$ci_lower, 2),
+      CI_Up     = round(drop_boot$ci_upper, 2),
+      ItemTotal = round(item_total, 2), 
+      item_total_corrected = round(item_total_corrected, 2)
+    )
+  }) %>%
+  ungroup()
+
+
+
+
+item_desc %>% select(group, Item, ItemTotal, item_total_corrected)
+```
+```{r KS-tests for distribution comparison}
+
+ks_results <- combined_dat_long |>
+  group_by(Item) |>
+  summarise(
+    ks_stat   = ks.test(
+      value[group == "Original"],
+      value[group == "German"]
+    )$statistic,
+    p_value   = ks.test(
+      value[group == "Original"],
+      value[group == "German"]
+    )$p.value,
+    .groups = "drop"
+  ) |>
+  mutate(significant = p_value < .05)
+
+ks_results
+```
+```{r item-level density histograms for sample comparison}
+label_map <- c(
+  SK01      = "Hand lowering",
+  SK02      = "Moving hands together",
+  SK03      = "Mosquito hallucination",
+  SK06      = "Arm rigidity",
+  SK07      = "Arm immobilization",
+  SK08      = "Music hallucination",
+  SK09      = "Negative visual hallucination",
+  SK10      = "Amnesia",
+  SK04SK05  = "Taste Hallucination",
+  SK12SK13  = "Post-session suggestion"
+)
+
+create_hist_plot <- function(var_name) {
+  
+  bins <- if (var_name %in% c("SK04SK05", "SK12SK13")) 11 else 6
+  
+  ggplot(
+    combined_dat %>%
+      filter(group %in% c("German", "Original")),
+    aes(
+      x = .data[[var_name]],
+      color = group,
+      fill = group
+    )
+  ) +
+    geom_histogram(
+      aes(y = after_stat(density)),
+      alpha = 0.2,
+      position = "identity",
+      bins = bins
+    ) +
+    labs(
+      title = label_map[[var_name]],
+      x = NULL,
+      y = "Density",
+      color = "Dataset",
+      fill = "Dataset"
+    ) +
+    scale_fill_manual(values = c(
+      German = "orange",
+      Original = "royalblue"
+    )) +
+    scale_color_manual(values = c(
+      German = "orange",
+      Original = "royalblue"
+    )) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+      axis.title = element_text(face = "bold", size = 24),
+      axis.text = element_text(face = "bold", size = 20),
+      axis.text.y = element_text(
+        face = "bold",
+        size = 20,
+        hjust = 0,
+        margin = margin(r = 10)
+      ),
+      legend.title = element_text(size = 20),
+      legend.text = element_text(size = 18)
+    )
+}
+
+plot_order <- c(
+  "SK01", "SK07",
+  "SK02", "SK08",
+  "SK03", "SK09",
+  "SK04SK05", "SK10",
+  "SK06", "SK12SK13"
+)
+
+hist_plots <- map(plot_order, create_hist_plot)
+names(hist_plots) <- plot_order
+
+combined_hist_plot <- wrap_plots(hist_plots, ncol = 2, nrow = 5, guides = "collect") &
+  theme(legend.position = "bottom")
+
+combined_hist_plot
+```
+```{r save plots2, include=FALSE}
+ggsave(
+  filename = "single_item_histo_comparison.png",
+  plot = combined_hist_plot,
+  width = 20,
+  height = 20,
+  units = "in",
+  dpi = 300
+)
+```
+
+
+
+## Scale-Level (PC score) Descriptives 
+```{r Scale-Level Descriptives}
+inner_join(combined_dat %>%
+  group_by(group) %>%
+  summarise(
+    mean = mean(PC, na.rm = TRUE),
+    sd   = sd(PC, na.rm = TRUE),
+    min  = min(PC, na.rm = TRUE),
+    max  = max(PC, na.rm = TRUE),
+    skew = psych::skew(PC, na.rm = TRUE),
+    kurt = psych::kurtosi(PC, na.rm = TRUE)
+  ),
+item_desc %>% 
+  group_by(group) %>%
+  summarise(meanItemTotal = mean(ItemTotal))
+)
+```
+```{r Two sample KS-Test on Scale-Level}
+ks.test(
+  combined_dat_long |> filter(group == "Original" & Item == "PC") |> pull(value),
+  combined_dat_long |> filter(group == "German"   & Item == "PC") |> pull(value)
+)
+```
+
+```{r Histo PC both datasets}
+histo <- ggplot(combined_dat, aes(x = PC, color=group, fill = group)) +
+  geom_histogram(aes(y = ..density..), alpha = 0.2, position = "identity", bins = 30) +
+  geom_density(linewidth = 1.2,
+               alpha = 0.2) +
+  labs(x = "PC Score",
+       y = "Density",
+       color = "Dataset",
+       fill = "Dataset") +
+  scale_fill_manual(values = c(
+      German = "orange",
+      Original = "royalblue"
+    )) +
+    scale_color_manual(values = c(
+      German = "orange",
+      Original = "royalblue"
+    )) +
+  theme_minimal() +
+    theme(
+      axis.title = element_text(face = "bold", size = 24),
+      axis.text = element_text(face = "bold", size = 24),
+      axis.text.y = element_text(
+        face = "bold",
+        size = 24,
+        hjust = 0,
+        margin = margin(r = 10)
+      ),
+    legend.title=element_text(size=24), 
+    legend.text=element_text(size=24)
+
+    )
+
+histo
+```
+```{r Create Q-Q Plots}
+# Split the two groups
+german <- combined_dat %>%
+  filter(group == "German") %>%
+  pull(PC)
+
+original <- combined_dat %>%
+  filter(group == "Original") %>%
+  pull(PC)
+
+# Create common probability sequence
+n <- min(length(german), length(original))
+probs <- seq(0, 1, length.out = n)
+
+# Compute quantiles
+qq_data <- data.frame(
+  German = quantile(german, probs = probs, na.rm = TRUE),
+  Original = quantile(original, probs = probs, na.rm = TRUE)
+)
+
+# Plot
+qq1 <- ggplot(qq_data, aes(x = Original, y = German)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Original PC quantiles",
+    y = "German PC quantiles"
+  ) +
+  coord_flip() +
+  theme_minimal() +
+    theme(
+      axis.title = element_text(face = "bold", size = 24),
+      axis.text = element_text(face = "bold", size = 24),
+      axis.text.y = element_text(
+        face = "bold",
+        size = 24,
+        hjust = 0,
+        margin = margin(r = 10)
+      ),
+      legend.position = "none"
+    )
+
+
+# Q-Q plot against normal distribution
+qq2 <- ggplot(data.frame(PC = german), aes(sample = PC)) +
+  stat_qq() +
+  stat_qq_line(linetype = "dashed", color = "red") +
+  labs(
+    x = "Normal distribution quantiles",
+    y = "German PC quantiles"
+  ) +
+  coord_flip() +
+  theme_minimal() +
+    theme(
+      axis.title = element_text(face = "bold", size = 24),
+      axis.text = element_text(face = "bold", size = 24),
+      axis.text.y = element_text(
+        face = "bold",
+        size = 24,
+        hjust = 0,
+        margin = margin(r = 10)
+      ),
+      legend.position = "none"
+    )
+
+qq1
+qq2
+```
+
+
+```{r save plots3, include=FALSE}
+patch <- histo/ patchwork::plot_spacer() / (qq1 | qq2) +
+  plot_layout(
+    heights = c(1, 0.02, 1),
+    widths = c(1.2, 1)
+  ) +
+    plot_annotation(tag_levels = "A") & 
+  theme(plot.tag = element_text(size = 32, face = "bold"))
+
+
+ggsave(
+  filename = "PCSscore_distribution.png",
+  plot = patch,
+  width = 20,
+  height = 20,
+  units = "in",
+  dpi = 300
+)
+```
+
+## Compare Cronbach's Alpha
+```{r Compare Cronbachs Alpha}
+alpha_lush <- psych::alpha(Lush_dat[items], n.iter=5000)
+alpha_ger  <- psych::alpha(Ger_dat[items], n.iter=5000)
+
+  
+
+data.frame(
+  Dataset = c("Original", "German"),
+  Alpha   = c(alpha_lush$total$raw_alpha,
+              alpha_ger$total$raw_alpha)
+)
+
+alpha_lush$boot.ci
+alpha_ger$boot.ci
+```
+
+

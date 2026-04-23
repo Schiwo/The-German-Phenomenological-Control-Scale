@@ -3,7 +3,7 @@
 
 ## Overview
 
-You will find three folders in repository:
+You will find four folders in repository:
 
 - Audio Files:
 	Five .mp3 audio files including the instructions of the German PC Scale as used for the validation study.
