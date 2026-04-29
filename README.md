@@ -34,11 +34,13 @@ If there is an option to skip to the next page it should only be pressable after
 Please use the github issues section or send a mail to m.luise.schreiter@tuebingen.mpg.de or m.schiltenwolf@lmu.de.
 
 
-## Citation
+## References
+
+A preprint is available on PsyArXiv: https://osf.io/preprints/psyarxiv/7dy4f_v1
 
 Please cite the German PC Scale as:
 
-Schiltenwolf, M., Schreiter, M. L., Antunovic, M., & Lush, P. (2023). The German Phenomenlogical Control Scale. Retrieved from: https://github.com/Schiwo/The-German-Phenomenlogical-Control-Scale
+Schiltenwolf, M., Schreiter, M. L., & Lush, P. (n.d.). Norms for a German version of the Phenomenological Control Scale: Measuring the capacity for creating and controlling experience. Retrieved from osf.io/preprints/psyarxiv/7dy4f_v1
 
 
 ## License

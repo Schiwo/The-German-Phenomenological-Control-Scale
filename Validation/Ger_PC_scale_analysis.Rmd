@@ -230,6 +230,90 @@ alpha_drop_boot_ci <- function(df, B = 2000, conf = 0.95, seed = NULL, warnings 
   out
 }
 ```
+```{r}
+cit_boot_ci <- function(df, B = 2000, conf = 0.95, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+
+  if (!is.data.frame(df) && !is.matrix(df)) {
+    stop("'df' must be a data frame or matrix containing only the scale items.")
+  }
+
+  df <- as.data.frame(df)
+
+  if (ncol(df) < 2) stop("At least 2 items are required.")
+
+  if (!all(vapply(df, is.numeric, logical(1)))) {
+    stop("All columns in 'df' must be numeric.")
+  }
+
+  if (!is.numeric(B) || length(B) != 1 || B < 1) {
+    stop("'B' must be a positive integer.")
+  }
+
+  B <- as.integer(B)
+
+  if (!is.numeric(conf) || length(conf) != 1 || conf <= 0 || conf >= 1) {
+    stop("'conf' must be a single number between 0 and 1.")
+  }
+
+  items <- names(df)
+
+  cit_fun <- function(dat) {
+    sapply(items, function(item) {
+      other_items <- setdiff(items, item)
+
+      total_other_mean <- rowMeans(
+        dat[, other_items, drop = FALSE],
+        na.rm = TRUE
+      )
+
+      cor(
+        dat[[item]],
+        total_other_mean,
+        use = "pairwise.complete.obs"
+      )
+    })
+  }
+
+  # Original estimates
+  cit0 <- cit_fun(df)
+
+  alpha_level <- 1 - conf
+  probs <- c(alpha_level / 2, 1 - alpha_level / 2)
+
+  # Bootstrap estimates
+  boot_cit <- matrix(NA_real_, nrow = B, ncol = length(items))
+  colnames(boot_cit) <- items
+
+  for (b in seq_len(B)) {
+    idx <- sample.int(nrow(df), size = nrow(df), replace = TRUE)
+
+    boot_cit[b, ] <- tryCatch({
+      cit_fun(df[idx, , drop = FALSE])
+    }, error = function(e) {
+      rep(NA_real_, length(items))
+    })
+  }
+
+  # Percentile bootstrap CIs
+  cis <- t(apply(boot_cit, 2, function(x) {
+    if (all(is.na(x))) {
+      c(NA_real_, NA_real_)
+    } else {
+      quantile(x, probs = probs, na.rm = TRUE, names = FALSE)
+    }
+  }))
+
+  data.frame(
+    item = items,
+    corrected_item_total = as.numeric(cit0[items]),
+    ci_lower = cis[, 1],
+    ci_upper = cis[, 2],
+    row.names = NULL
+  )
+}
+```
+
 
 ```{r calculate descriptives}
 # Items to include
@@ -293,7 +377,27 @@ result <- data.frame(
 )
 
 result 
+
+corrected_item_total <- sapply(items, function(item) {
+    other_items <- setdiff(items, item)
+  total_other_mean <- rowMeans(dat_items[, other_items], na.rm = TRUE)
+  cor(dat_items[[item]], total_other_mean, use = "pairwise.complete.obs")
+})
+
+corrected_ItemTotal_CIs <- cit_boot_ci(dat_items, B = 2000, conf = 0.95, seed = 123)
+
+result |> 
+  left_join(
+    data.frame(
+      item_code = items,
+      corrected_ItemTotal = round(corrected_item_total, 2),
+      row.names = NULL
+    )
+  ) %>% 
+  left_join(corrected_ItemTotal_CIs %>% rename(item_code = item) %>% select(-c(corrected_item_total)) %>% mutate(ci_lower = round(ci_lower, 2), ci_upper = round(ci_upper, 2)))
 ```
+
+
 
 ```{r alpha drop item}
 a0 <- psych::alpha(dat_items, warnings = TRUE)
@@ -541,7 +645,10 @@ ggsave(
 ```{r prepare data}
 Lush_dat <- read.csv("PeteOSF/PCS_norms_first_test_data.csv", sep = ",")
 
-Lush_dat <- Lush_dat %>%  filter(exclude == 0)
+Lush_dat <- Lush_dat %>%  
+  filter(exclude == 0) %>%             
+  filter(Condition == 0) 
+
 
 rename_map <- c(
   ParticipantNumber                   = "CASE",
@@ -620,6 +727,8 @@ combined_dat_long <- combined_dat %>%
 ## Item-Level Descriptives
 ```{r Item-Level Descriptives}
 
+item_labels <- sapply(items, function(x) Hmisc::label(combined_dat[[x]]))
+
 item_desc <- combined_dat %>%
   group_by(group) %>%
   group_modify(~{
@@ -651,11 +760,9 @@ item_desc <- combined_dat %>%
       cor(.x[[x]], PC, use = "pairwise.complete.obs", method = "pearson")
     })
     
-    item_total_corrected <- alpha_res$item.stats$r.drop
-
     data.frame(
       item_code = items,
-      Item      = sapply(items, function(x) Hmisc::label(.x[[x]])),
+      Item      = unname(item_labels),
       Mean      = round(means, 2),
       SD        = round(sds, 2),
       Skew      = round(skew, 2),
@@ -663,17 +770,57 @@ item_desc <- combined_dat %>%
       Alpha     = round(alpha_drop$raw_alpha, 2),
       CI_Low    = round(drop_boot$ci_lower, 2),
       CI_Up     = round(drop_boot$ci_upper, 2),
-      ItemTotal = round(item_total, 2), 
-      item_total_corrected = round(item_total_corrected, 2)
+      ItemTotal = round(item_total, 2)
     )
   }) %>%
   ungroup()
 
 
 
+corrected_by_group <- combined_dat %>%
+  group_by(group) %>%
+  group_modify(~ {
+    
+    dat <- .x
+    
+    vals <- sapply(items, function(item) {
+      
+      other_items <- setdiff(items, item)
+      total_other_mean <- rowMeans(dat[, other_items], na.rm = TRUE)
+      
+      cor(dat[[item]],
+          total_other_mean,
+          use = "pairwise.complete.obs")
+    })
+    
+    data.frame(
+      item_code = items,
+      corrected_item_total = round(vals, 2)
+    )
+  }) %>%
+  ungroup()
 
-item_desc %>% select(group, Item, ItemTotal, item_total_corrected)
+corrected_by_group_CIs <- combined_dat %>% 
+  group_by(group) %>% 
+  group_modify(~{
+        dat_items <- .x[, items, drop = FALSE]
+
+        CIs <- cit_boot_ci(dat_items, B = 2000, conf = 0.95, seed = 123)
+  }) %>%
+  ungroup()
+
+
+item_desc |> left_join(
+  corrected_by_group
+) %>% 
+  left_join(corrected_by_group_CIs %>% rename(item_code = item) %>% select(-c(corrected_item_total)) %>% mutate(ci_lower = round(ci_lower, 2), ci_upper = round(ci_upper, 2)))
+
+
+
+
 ```
+
+
 ```{r KS-tests for distribution comparison}
 
 ks_results <- combined_dat_long |>
@@ -695,16 +842,16 @@ ks_results
 ```
 ```{r item-level density histograms for sample comparison}
 label_map <- c(
-  SK01      = "Hand lowering",
-  SK02      = "Moving hands together",
-  SK03      = "Mosquito hallucination",
-  SK06      = "Arm rigidity",
-  SK07      = "Arm immobilization",
-  SK08      = "Music hallucination",
-  SK09      = "Negative visual hallucination",
-  SK10      = "Amnesia",
-  SK04SK05  = "Taste Hallucination",
-  SK12SK13  = "Post-session suggestion"
+  SK01      = "1) Hand lowering",
+  SK02      = "2) Moving hands together",
+  SK03      = "3) Mosquito hallucination",
+  SK04SK05  = "4) Taste Hallucination",
+  SK06      = "5) Arm rigidity",
+  SK07      = "6) Arm immobilization",
+  SK08      = "7) Music hallucination",
+  SK09      = "8) Negative visual hallucination",
+  SK10      = "9) Amnesia",
+  SK12SK13  = "10) Post-session suggestion"
 )
 
 create_hist_plot <- function(var_name) {
