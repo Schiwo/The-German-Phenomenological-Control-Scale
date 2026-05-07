@@ -36,7 +36,7 @@ Please use the github issues section or send a mail to m.luise.schreiter@tuebing
 
 ## References
 
-A preprint is available on PsyArXiv: https://osf.io/preprints/psyarxiv/7dy4f_v1
+A preprint is available on PsyArXiv: https://doi.org/10.31234/osf.io/6xq9a_v1
 
 Please cite the German PC Scale as:
 
