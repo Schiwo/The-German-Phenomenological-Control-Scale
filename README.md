@@ -40,7 +40,7 @@ A preprint is available on PsyArXiv: https://doi.org/10.31234/osf.io/6xq9a_v1
 
 Please cite the German PC Scale as:
 
-Schiltenwolf, M., Schreiter, M. L., & Lush, P. (n.d.). Norms for a German version of the Phenomenological Control Scale: Measuring the capacity for creating and controlling experience. Retrieved from osf.io/preprints/psyarxiv/7dy4f_v1
+Schiltenwolf, M., Schreiter, M. L., & Lush, P. (n.d.). Norms for a German version of the Phenomenological Control Scale: Measuring the capacity for creating and controlling experience. Retrieved from osf.io/preprints/psyarxiv/6xq9a_v1
 
 
 ## License
