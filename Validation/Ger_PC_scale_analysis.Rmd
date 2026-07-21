@@ -70,6 +70,8 @@ ggthemr("flat")
 ```{r read data}
 dat <- read.csv("GitHub/german_pc_scale_validation_data.CSV",
                 sep = ";")
+
+dat$CASE |> unique() |> length()
 ```
 
 ## Exclusion Criteria
@@ -101,6 +103,12 @@ outlierTime <- dat[dat$TIME005 < 900 ,]$CASE
 # remove outlier from dataset
 dat <- dat[! dat$CASE %in% outlierMeaningful, ]
 dat <- dat[! dat$CASE %in% outlierTime, ]
+
+outlierMeaningful |> unique() |> length()
+outlierTime |> unique() |> length()
+c(outlierMeaningful, outlierTime) |> unique() |> length()
+
+dat$CASE|> unique() |> length()
 ```
 
 ## Prepare dataframe
@@ -943,53 +951,145 @@ inner_join(combined_dat %>%
     min  = min(PC, na.rm = TRUE),
     max  = max(PC, na.rm = TRUE),
     skew = psych::skew(PC, na.rm = TRUE),
-    kurt = psych::kurtosi(PC, na.rm = TRUE)
+    kurt = psych::kurtosi(PC, na.rm = TRUE),
+    p10  = quantile(PC, probs = 0.10, na.rm = TRUE),
+    p25  = quantile(PC, probs = 0.25, na.rm = TRUE),
+    p50  = quantile(PC, probs = 0.50, na.rm = TRUE),
+    p75  = quantile(PC, probs = 0.75, na.rm = TRUE),
+    p90  = quantile(PC, probs = 0.90, na.rm = TRUE),
   ),
 item_desc %>% 
   group_by(group) %>%
   summarise(meanItemTotal = mean(ItemTotal))
-)
+) |> select(group, p10, p25, p50, p75, p90)
 ```
 ```{r Two sample KS-Test on Scale-Level}
-ks.test(
-  combined_dat_long |> filter(group == "Original" & Item == "PC") |> pull(value),
-  combined_dat_long |> filter(group == "German"   & Item == "PC") |> pull(value)
+
+res <- ks.test(
+  combined_dat_long |>
+    filter(group == "Original", Item == "PC") |>
+    pull(value),
+  combined_dat_long |>
+    filter(group == "German", Item == "PC") |>
+    pull(value)
+)
+
+res
+
+```
+```{r}
+library(transport)
+
+wasserstein1d(
+    combined_dat_long |>
+    filter(group == "Original", Item == "PC") |>
+    pull(value),
+  combined_dat_long |>
+    filter(group == "German", Item == "PC") |>
+    pull(value)
+
 )
 ```
 
+
 ```{r Histo PC both datasets}
-histo <- ggplot(combined_dat, aes(x = PC, color=group, fill = group)) +
-  geom_histogram(aes(y = ..density..), alpha = 0.2, position = "identity", bins = 30) +
-  geom_density(linewidth = 1.2,
-               alpha = 0.2) +
-  labs(x = "PC Score",
-       y = "Density",
-       color = "Dataset",
-       fill = "Dataset") +
-  scale_fill_manual(values = c(
-      German = "orange",
-      Original = "royalblue"
-    )) +
-    scale_color_manual(values = c(
-      German = "orange",
-      Original = "royalblue"
-    )) +
-  theme_minimal() +
-    theme(
-      axis.title = element_text(face = "bold", size = 24),
-      axis.text = element_text(face = "bold", size = 24),
-      axis.text.y = element_text(
-        face = "bold",
-        size = 24,
-        hjust = 0,
-        margin = margin(r = 10)
-      ),
-    legend.title=element_text(size=24), 
-    legend.text=element_text(size=24)
+group_colors <- c(
+  German = "orange",
+  Original = "royalblue"
+)
 
+
+percentile_points <- combined_dat |>
+  dplyr::group_by(group) |>
+  dplyr::summarise(
+    `10th percentile` = quantile(PC, 0.10, na.rm = TRUE),
+    `90th percentile` = quantile(PC, 0.90, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(`10th percentile`, `90th percentile`),
+    names_to = "percentile",
+    values_to = "PC"
+  )
+
+boxplot_top <- ggplot(
+  combined_dat,
+  aes(x = PC, y = group, color = group, fill = group)
+) +
+  geom_boxplot(
+    alpha = 0.25,
+    linewidth = 1,
+    width = 0.6,
+    outlier.shape = NA
+  ) +
+  geom_point(
+    data = percentile_points,
+    aes(
+      x = PC,
+      y = group,
+      color = group,
+      shape = percentile
+    ),
+    inherit.aes = FALSE,
+    size = 6,
+    stroke = 1.2
+  ) +
+  scale_fill_manual(values = group_colors) +
+  scale_color_manual(values = group_colors) +
+  scale_shape_manual(
+    values = c(
+      "10th percentile" = 17,
+      "90th percentile" = 16
     )
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "none",
+    plot.margin = margin(5, 5, 0, 5)
+  )
 
-histo
+histo <- ggplot(
+  combined_dat,
+  aes(x = PC, color = group, fill = group)
+) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    alpha = 0.2,
+    position = "identity",
+    bins = 30
+  ) +
+  geom_density(
+    linewidth = 1.2,
+    alpha = 0.2
+  ) +
+  labs(
+    x = "PC Score",
+    y = "Density",
+    color = "Dataset",
+    fill = "Dataset"
+  ) +
+  scale_fill_manual(values = group_colors) +
+  scale_color_manual(values = group_colors) +
+  theme_minimal() +
+  theme(
+    axis.title = element_text(face = "bold", size = 24),
+    axis.text = element_text(face = "bold", size = 24),
+    axis.text.y = element_text(
+      face = "bold",
+      size = 24,
+      hjust = 0,
+      margin = margin(r = 10)
+    ),
+    legend.title = element_text(size = 24),
+    legend.text = element_text(size = 24),
+    plot.margin = margin(0, 5, 5, 5)
+  )
+
 ```
 ```{r Create Q-Q Plots}
 # Split the two groups
@@ -1058,17 +1158,47 @@ qq2 <- ggplot(data.frame(PC = german), aes(sample = PC)) +
 
 qq1
 qq2
+
 ```
 
 
 ```{r save plots3, include=FALSE}
-patch <- histo/ patchwork::plot_spacer() / (qq1 | qq2) +
+# Combine the plots
+distribution_plot <- boxplot_top / histo +
+  plot_layout(heights = c(1, 4)) +
+  plot_annotation(tag_levels = NULL)
+
+distribution_plot
+
+patch <- boxplot_top / histo / patchwork::plot_spacer() /(qq1+qq2) +
   plot_layout(
-    heights = c(1, 0.02, 1),
-    widths = c(1.2, 1)
+    heights = c(0.25, 1 , 0.02, 1)
   ) +
-    plot_annotation(tag_levels = "A") & 
-  theme(plot.tag = element_text(size = 32, face = "bold"))
+  plot_annotation(tag_levels = "A") &
+  theme(
+    plot.tag = element_text(
+      size = 32,
+      face = "bold"
+    )
+  )
+
+
+# patch <- distribution_plot /
+#   patchwork::plot_spacer() /
+#   qq_row +
+#   plot_layout(
+#     heights = c(1, 0.02, 1)
+#   ) +
+#   plot_annotation(tag_levels = "A") &
+#   theme(
+#     plot.tag = element_text(
+#       size = 32,
+#       face = "bold"
+#     )
+#   )
+
+
+
 
 
 ggsave(
@@ -1097,5 +1227,90 @@ data.frame(
 alpha_lush$boot.ci
 alpha_ger$boot.ci
 ```
+
+## Exploratory Factor Analysis
+```{r}
+efa_vars <- combined_dat %>%
+  select(SK01:SK12SK13) %>%
+  names()
+
+eigenvalues <- combined_dat %>%
+  group_by(group) %>%
+  group_modify(~{
+    cor_mat <- .x %>%
+      select(all_of(efa_vars)) %>%
+      cor(use = "pairwise.complete.obs")
+
+    tibble(
+      Factor = seq_along(eigen(cor_mat)$values),
+      Eigenvalue = eigen(cor_mat)$values
+    )
+  })
+
+scree <- eigenvalues %>%
+  ggplot(
+  aes(x = Factor, y = Eigenvalue, color = group)
+) +
+  geom_line() +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  labs(
+    x = "Factor",
+    y = "Eigenvalue",
+    color = "Dataset",
+  ) +
+  scale_color_manual(values = group_colors) +
+  theme_minimal() +
+  theme(
+    axis.title = element_text(face = "bold", size = 24),
+    axis.text = element_text(face = "bold", size = 24),
+    axis.text.y = element_text(
+      face = "bold",
+      size = 24,
+      hjust = 0,
+      margin = margin(r = 10)
+    ),
+    legend.title = element_text(size = 24),
+    legend.text = element_text(size = 24),
+    plot.margin = margin(0, 5, 5, 5)
+  )
+
+
+
+
+efa_result_german <- fa(
+  r = combined_dat %>%
+    filter(group == "German")|> 
+    select(all_of(efa_vars)),
+  nfactors = 2,
+  rotate = "oblimin")
+
+efa_result_original <- fa(
+  r = combined_dat %>%
+    filter(group == "Original")|> 
+    select(all_of(efa_vars)),
+  nfactors = 2,
+  rotate = "oblimin")
+
+factor.congruence(
+  efa_result_german,
+  efa_result_original
+)
+
+efa_result_german$Vaccounted
+efa_result_original$Vaccounted
+```
+```{r, include=FALSE}
+ggsave(
+  filename = "EFA_scree.png",
+  plot = scree,
+  width = 20,
+  height = 10,
+  units = "in",
+  dpi = 300
+)
+```
+
+
 
 

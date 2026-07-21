@@ -1,0 +1,2 @@
+A markdown version of the analysis script can be found here:
+https://rpubs.com/Schiwo/PCS-GER
